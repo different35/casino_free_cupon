@@ -9,9 +9,11 @@ interface AddCouponModalProps {
 
 export default function AddCouponModal({ onClose, onAdd }: AddCouponModalProps) {
   const [code, setCode] = useState('');
-  const [platform, setPlatform] = useState<CasinoPlatform>('betmgm');
+  const [platform, setPlatform] = useState<CasinoPlatform | string>('betmgm');
   const [bonusType, setBonusType] = useState<BonusType>('free_spins');
-  const [value, setValue] = useState(50);
+  const [value, setValue] = useState(0);
+  const [sourceUrl, setSourceUrl] = useState('');
+  const [note, setNote] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,8 +25,10 @@ export default function AddCouponModal({ onClose, onAdd }: AddCouponModalProps) 
       status: 'new',
       bonusType,
       value,
-      expiresAt: new Date(Date.now() + 72 * 3600000),
+      expiresAt: new Date(Date.now() + 7 * 24 * 3600000), // 7 gün
       isActive: true,
+      sourceUrl: sourceUrl.trim() || undefined,
+      note: note.trim() || undefined,
     });
   };
 
@@ -34,11 +38,11 @@ export default function AddCouponModal({ onClose, onAdd }: AddCouponModalProps) 
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose}></div>
       
       {/* Modal */}
-      <div className="relative bg-gray-900 border border-purple-500/30 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+      <div className="relative bg-gray-900 border border-purple-500/30 rounded-2xl p-6 w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-xl font-bold text-white flex items-center gap-2">
             <span>🎫</span>
-            Manuel Kod Ekle
+            Kupon Kodu Ekle
           </h2>
           <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
             <i className="fas fa-times text-xl"></i>
@@ -48,12 +52,12 @@ export default function AddCouponModal({ onClose, onAdd }: AddCouponModalProps) 
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Code Input */}
           <div>
-            <label className="block text-sm text-gray-400 mb-1">Kupon Kodu</label>
+            <label className="block text-sm text-gray-400 mb-1">Kupon Kodu *</label>
             <input
               type="text"
               value={code}
               onChange={(e) => setCode(e.target.value)}
-              placeholder="Örn: BONUS123ABC"
+              placeholder="Örn: FREESPIN50"
               className="w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 font-mono text-lg tracking-wider focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/30"
               required
             />
@@ -64,7 +68,7 @@ export default function AddCouponModal({ onClose, onAdd }: AddCouponModalProps) 
             <label className="block text-sm text-gray-400 mb-1">Platform</label>
             <select
               value={platform}
-              onChange={(e) => setPlatform(e.target.value as CasinoPlatform)}
+              onChange={(e) => setPlatform(e.target.value)}
               className="w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/30"
             >
               {Object.entries(platformNames).map(([key, name]) => (
@@ -89,14 +93,38 @@ export default function AddCouponModal({ onClose, onAdd }: AddCouponModalProps) 
 
           {/* Value */}
           <div>
-            <label className="block text-sm text-gray-400 mb-1">Değer ($)</label>
+            <label className="block text-sm text-gray-400 mb-1">Değer ($) - Opsiyonel</label>
             <input
               type="number"
               value={value}
               onChange={(e) => setValue(Number(e.target.value))}
-              min={1}
-              max={1000}
+              min={0}
+              max={10000}
               className="w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/30"
+            />
+          </div>
+
+          {/* Source URL */}
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">Kaynak URL - Nereden buldunuz?</label>
+            <input
+              type="url"
+              value={sourceUrl}
+              onChange={(e) => setSourceUrl(e.target.value)}
+              placeholder="https://..."
+              className="w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/30"
+            />
+          </div>
+
+          {/* Note */}
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">Not - Opsiyonel</label>
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Kod hakkında notunuz..."
+              rows={2}
+              className="w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/30 resize-none"
             />
           </div>
 
@@ -105,7 +133,7 @@ export default function AddCouponModal({ onClose, onAdd }: AddCouponModalProps) 
             type="submit"
             className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-bold py-3 rounded-lg transition-all transform hover:scale-[1.02] active:scale-[0.98]"
           >
-            🎰 Kodu Kaydet
+            💾 Kodu Kaydet
           </button>
         </form>
       </div>

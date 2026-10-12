@@ -1,17 +1,11 @@
-import { useState } from 'react';
-
 interface HeaderProps {
   notifications: string[];
   showNotifications: boolean;
   setShowNotifications: (show: boolean) => void;
-  isLive: boolean;
-  setIsLive: (live: boolean) => void;
   onAddCoupon: () => void;
 }
 
-export default function Header({ notifications, showNotifications, setShowNotifications, isLive, setIsLive, onAddCoupon }: HeaderProps) {
-  const [menuOpen, setMenuOpen] = useState(false);
-
+export default function Header({ notifications, showNotifications, setShowNotifications, onAddCoupon }: HeaderProps) {
   return (
     <header className="bg-gray-900/80 backdrop-blur-md border-b border-purple-500/30 sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
@@ -19,24 +13,11 @@ export default function Header({ notifications, showNotifications, setShowNotifi
           <div className="text-3xl">🎰</div>
           <div>
             <h1 className="text-xl font-bold text-white">SlotBonus Tracker</h1>
-            <p className="text-xs text-purple-300">Casino Kupon Kodları - Anlık Takip</p>
+            <p className="text-xs text-purple-300">Casino Kupon Kodlarınızı Takip Edin</p>
           </div>
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Live Toggle */}
-          <button
-            onClick={() => setIsLive(!isLive)}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
-              isLive 
-                ? 'bg-green-500/20 text-green-400 border border-green-500/50' 
-                : 'bg-gray-700 text-gray-400 border border-gray-600'
-            }`}
-          >
-            <span className={`w-2 h-2 rounded-full ${isLive ? 'bg-green-400 animate-pulse' : 'bg-gray-500'}`}></span>
-            {isLive ? 'CANLI' : 'DURDUR'}
-          </button>
-
           {/* Add Coupon */}
           <button
             onClick={onAddCoupon}

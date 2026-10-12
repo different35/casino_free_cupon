@@ -6,7 +6,8 @@ export type CasinoPlatform =
   | 'golden_nugget' 
   | 'borgata'
   | 'hard_rock'
-  | 'unibet';
+  | 'unibet'
+  | 'other';
 
 export type CouponStatus = 'new' | 'active' | 'expired' | 'used';
 
@@ -15,13 +16,15 @@ export type BonusType = 'free_spins' | 'deposit_match' | 'no_deposit' | 'cashbac
 export interface Coupon {
   id: string;
   code: string;
-  platform: CasinoPlatform;
+  platform: CasinoPlatform | string;
   status: CouponStatus;
   bonusType: BonusType;
   value: number;
   detectedAt: Date;
   expiresAt: Date;
   isActive: boolean;
+  sourceUrl?: string;
+  note?: string;
 }
 
 export interface Stats {

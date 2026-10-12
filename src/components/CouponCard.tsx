@@ -4,9 +4,11 @@ import { platformNames, bonusTypeNames } from '../data/sampleData';
 interface CouponCardProps {
   coupon: Coupon;
   onCopy: (code: string) => void;
+  onDelete: (id: string) => void;
+  onUpdateStatus: (id: string, status: Coupon['status']) => void;
 }
 
-export default function CouponCard({ coupon, onCopy }: CouponCardProps) {
+export default function CouponCard({ coupon, onCopy, onDelete, onUpdateStatus }: CouponCardProps) {
   const timeSince = (date: Date): string => {
     const seconds = Math.floor((new Date().getTime() - date.getTime()) / 1000);
     if (seconds < 60) return `${seconds}sn önce`;
@@ -59,8 +61,15 @@ export default function CouponCard({ coupon, onCopy }: CouponCardProps) {
       borgata: 'from-red-500/10 to-red-600/10 border-red-500/30',
       hard_rock: 'from-gray-500/10 to-gray-600/10 border-gray-500/30',
       unibet: 'from-emerald-500/10 to-emerald-600/10 border-emerald-500/30',
+      other: 'from-purple-500/10 to-purple-600/10 border-purple-500/30',
     };
-    return colors[coupon.platform] || 'from-purple-500/10 to-purple-600/10 border-purple-500/30';
+    return colors[coupon.platform] || colors['other'];
+  };
+
+  const handleDelete = () => {
+    if (confirm('Bu kodu silmek istediğinize emin misiniz?')) {
+      onDelete(coupon.id);
+    }
   };
 
   return (
@@ -70,7 +79,9 @@ export default function CouponCard({ coupon, onCopy }: CouponCardProps) {
         <div>
           <div className="flex items-center gap-2">
             <span className="text-lg">{getBonusIcon()}</span>
-            <span className="text-sm font-medium text-gray-300">{platformNames[coupon.platform]}</span>
+            <span className="text-sm font-medium text-gray-300">
+              {platformNames[coupon.platform as keyof typeof platformNames] || coupon.platform}
+            </span>
           </div>
           <p className="text-xs text-gray-500 mt-1">{timeSince(coupon.detectedAt)}</p>
         </div>
@@ -90,15 +101,68 @@ export default function CouponCard({ coupon, onCopy }: CouponCardProps) {
       </div>
 
       {/* Details */}
-      <div className="flex items-center justify-between text-xs">
+      <div className="flex items-center justify-between text-xs mb-3">
         <div className="flex items-center gap-2">
-          <span className="text-gray-400">{bonusTypeNames[coupon.bonusType]}</span>
-          <span className="text-white font-bold">${coupon.value}</span>
+          <span className="text-gray-400">
+            {bonusTypeNames[coupon.bonusType as keyof typeof bonusTypeNames] || coupon.bonusType}
+          </span>
+          {coupon.value > 0 && (
+            <span className="text-white font-bold">${coupon.value}</span>
+          )}
         </div>
         <span className={`text-xs ${coupon.expiresAt < new Date() ? 'text-red-400' : 'text-gray-400'}`}>
           ⏱️ {timeUntilExpiry(coupon.expiresAt)}
         </span>
       </div>
+
+      {/* Actions */}
+      <div className="flex items-center gap-2 pt-2 border-t border-gray-700/50">
+        {coupon.status === 'new' && (
+          <button
+            onClick={() => onUpdateStatus(coupon.id, 'active')}
+            className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+          >
+            ✅ Aktif Yap
+          </button>
+        )}
+        {coupon.status === 'active' && (
+          <button
+            onClick={() => onUpdateStatus(coupon.id, 'used')}
+            className="text-xs text-green-400 hover:text-green-300 transition-colors"
+          >
+            ✓ Kullanıldı
+          </button>
+        )}
+        {coupon.status !== 'expired' && (
+          <button
+            onClick={() => onUpdateStatus(coupon.id, 'expired')}
+            className="text-xs text-red-400 hover:text-red-300 transition-colors"
+          >
+            ⏰ Süresi Doldu
+          </button>
+        )}
+        <button
+          onClick={handleDelete}
+          className="text-xs text-gray-500 hover:text-red-400 transition-colors ml-auto"
+        >
+          <i className="fas fa-trash"></i> Sil
+        </button>
+      </div>
+
+      {/* Source URL */}
+      {coupon.sourceUrl && (
+        <div className="mt-2 pt-2 border-t border-gray-700/30">
+          <a
+            href={coupon.sourceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-purple-400 hover:text-purple-300 transition-colors flex items-center gap-1"
+          >
+            <i className="fas fa-external-link-alt"></i>
+            Kaynak Linki
+          </a>
+        </div>
+      )}
     </div>
   );
 }
