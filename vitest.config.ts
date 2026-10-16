@@ -4,13 +4,6 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
-    setupFiles: ['./src/test/setup.ts'],
-    include: [
-      'src/**/*.test.{ts,tsx}',
-      'backend/**/*.test.{js,mjs}'
-    ],
-    typecheck: {
-      enabled: false,
-    },
+    include: ['src/**/*.test.{js,jsx,ts,tsx}'],
   },
 });
