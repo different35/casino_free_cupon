@@ -1,164 +1,281 @@
-import { useState, useEffect, useCallback } from 'react';
-import Header from './components/Header';
-import StatsPanel from './components/StatsPanel';
-import CouponCard from './components/CouponCard';
-import FilterBar from './components/FilterBar';
-import NotificationPanel from './components/NotificationPanel';
-import AddCouponModal from './components/AddCouponModal';
-import SourcesDashboard from './components/SourcesDashboard';
-import PeakHoursWidget from './components/PeakHoursWidget';
-import { Coupon } from './types';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import BotSetup from './components/BotSetup';
+import LiveCollector from './components/LiveCollector';
+import CollectedCodes from './components/CollectedCodes';
+import { CollectedCoupon, BotConfig } from './types';
 
-const STORAGE_KEY = 'slotbonus_coupons';
+const BOT_CONFIG_KEY = 'telegram_bot_config';
+const COUPONS_KEY = 'collected_coupons';
 
-function loadCoupons(): Coupon[] {
+function loadConfig(): BotConfig | null {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
+    const stored = localStorage.getItem(BOT_CONFIG_KEY);
+    return stored ? JSON.parse(stored) : null;
+  } catch { return null; }
+}
+
+function saveConfig(config: BotConfig) {
+  localStorage.setItem(BOT_CONFIG_KEY, JSON.stringify(config));
+}
+
+function loadCoupons(): CollectedCoupon[] {
+  try {
+    const stored = localStorage.getItem(COUPONS_KEY);
     if (stored) {
-      const parsed = JSON.parse(stored);
-      return parsed.map((c: any) => ({
+      return JSON.parse(stored).map((c: any) => ({
         ...c,
-        detectedAt: new Date(c.detectedAt),
-        expiresAt: new Date(c.expiresAt),
+        collectedAt: new Date(c.collectedAt),
       }));
     }
-  } catch (e) {
-    console.error('Veri yükleme hatası:', e);
-  }
+  } catch { /* empty */ }
   return [];
 }
 
-function saveCoupons(coupons: Coupon[]) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(coupons));
-  } catch (e) {
-    console.error('Veri kaydetme hatası:', e);
+function saveCoupons(coupons: CollectedCoupon[]) {
+  localStorage.setItem(COUPONS_KEY, JSON.stringify(coupons));
+}
+
+// Kupon kodu tespit regex'leri
+const CODE_PATTERNS = [
+  /(?:bonus|code|coupon|promo|spin|free)[\s:_-]*([A-Z0-9]{6,20})/gi,
+  /\b(NEXT[A-Z0-9]{10,20})\b/g,
+  /\b([A-Z]{3,6}[0-9]{3,8}[A-Z0-9]{0,4})\b/g,
+  /\b(FREE[A-Z0-9]{4,12})\b/gi,
+  /\b(SPIN[A-Z0-9]{4,12})\b/gi,
+  /\b(BONUS[A-Z0-9]{4,12})\b/gi,
+  /\b(DEPOSIT[A-Z0-9]{4,12})\b/gi,
+  /\b(CASH[A-Z0-9]{4,12})\b/gi,
+  /\b([A-Z0-9]{8,20})\b/g, // Genel büyük harf+rakam kodları
+];
+
+// Spam filtre - bunları kod olarak sayma
+const BLACKLIST = [
+  'HTTP', 'HTTPS', 'WWW', 'COM', 'ORG', 'NET', 'TELEGRAM', 'BOT',
+  'CHAT', 'JOIN', 'CHANNEL', 'GROUP', 'MESSAGE', 'STICKER', 'PHOTO',
+  'VIDEO', 'DOCUMENT', 'ANSWER', 'CALLBACK', 'UPDATE', 'RESULT',
+  'ABCDEFGHIJKLMNOPQRSTUVWXYZ', // Tam alfabe
+];
+
+function extractCodes(text: string): string[] {
+  const codes: Set<string> = new Set();
+  
+  for (const pattern of CODE_PATTERNS) {
+    const regex = new RegExp(pattern.source, pattern.flags);
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      const code = match[1] || match[0];
+      // Filtreleme
+      if (code.length >= 6 && 
+          code.length <= 20 && 
+          !BLACKLIST.includes(code.toUpperCase()) &&
+          /[A-Z]/.test(code) && 
+          /[0-9]/.test(code) &&
+          !/^(GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD)$/.test(code)) {
+        codes.add(code.toUpperCase());
+      }
+    }
   }
+  
+  return Array.from(codes);
 }
 
 function App() {
-  const [coupons, setCoupons] = useState<Coupon[]>([]);
-  const [filter, setFilter] = useState<string>('all');
-  const [platformFilter, setPlatformFilter] = useState<string>('all');
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [showNotifications, setShowNotifications] = useState<boolean>(false);
-  const [showAddModal, setShowAddModal] = useState<boolean>(false);
-  const [notifications, setNotifications] = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState<'tracker' | 'sources' | 'hours'>('tracker');
-  const [loaded, setLoaded] = useState(false);
+  const [config, setConfig] = useState<BotConfig | null>(loadConfig());
+  const [coupons, setCoupons] = useState<CollectedCoupon[]>(loadCoupons());
+  const [isCollecting, setIsCollecting] = useState(false);
+  const [lastUpdateId, setLastUpdateId] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [stats, setStats] = useState({ messagesScanned: 0, codesFound: 0 });
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [activeTab, setActiveTab] = useState<'collector' | 'codes' | 'setup'>('collector');
 
-  useEffect(() => {
-    setCoupons(loadCoupons());
-    setLoaded(true);
-  }, []);
+  // Telegram Bot API - getUpdates
+  const fetchUpdates = useCallback(async () => {
+    if (!config?.token) return;
 
-  useEffect(() => {
-    if (loaded) {
-      saveCoupons(coupons);
+    try {
+      const url = `https://api.telegram.org/bot${config.token}/getUpdates?offset=${lastUpdateId + 1}&timeout=5&allowed_updates=["channel_posts","message"]`;
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.description || 'API hatası');
+      }
+
+      const data = await response.json();
+      
+      if (!data.ok) {
+        throw new Error(data.description || 'Bilinmeyen hata');
+      }
+
+      if (data.result && data.result.length > 0) {
+        const newCoupons: CollectedCoupon[] = [];
+        let maxUpdateId = lastUpdateId;
+
+        for (const update of data.result) {
+          maxUpdateId = Math.max(maxUpdateId, update.update_id);
+
+          // Kanal postu veya mesajdan metni çıkar
+          let text = '';
+          let chatTitle = '';
+          let chatId = 0;
+          let messageId = 0;
+
+          if (update.channel_post) {
+            text = update.channel_post.text || update.channel_post.caption || '';
+            chatTitle = update.channel_post.chat.title || 'Bilinmeyen Kanal';
+            chatId = update.channel_post.chat.id;
+            messageId = update.channel_post.message_id;
+          } else if (update.message) {
+            text = update.message.text || update.message.caption || '';
+            chatTitle = update.message.chat.title || update.message.chat.first_name || 'Özel Mesaj';
+            chatId = update.message.chat.id;
+            messageId = update.message.message_id;
+          }
+
+          if (text) {
+            setStats(prev => ({ ...prev, messagesScanned: prev.messagesScanned + 1 }));
+            const codes = extractCodes(text);
+            
+            for (const code of codes) {
+              // Duplicate kontrolü
+              const exists = coupons.some(c => c.code === code);
+              if (!exists) {
+                const newCoupon: CollectedCoupon = {
+                  id: `${chatId}-${messageId}-${code}`,
+                  code,
+                  source: chatTitle,
+                  chatId,
+                  messageId,
+                  fullText: text.substring(0, 500),
+                  collectedAt: new Date(),
+                  status: 'new',
+                  copied: false,
+                };
+                newCoupons.push(newCoupon);
+              }
+            }
+
+            if (codes.length > 0) {
+              setStats(prev => ({ ...prev, codesFound: prev.codesFound + codes.length }));
+            }
+          }
+        }
+
+        if (newCoupons.length > 0) {
+          setCoupons(prev => {
+            const updated = [...newCoupons, ...prev];
+            saveCoupons(updated);
+            return updated;
+          });
+        }
+
+        setLastUpdateId(maxUpdateId);
+      }
+
+      setError(null);
+    } catch (err: any) {
+      setError(err.message || 'Bağlantı hatası');
     }
-  }, [coupons, loaded]);
+  }, [config, lastUpdateId, coupons]);
 
-  // Bildirim zamanlayıcıları - yoğun saatlerde uyarı
+  // Polling başlat/durdur
   useEffect(() => {
-    if (!loaded) return;
-    
-    const checkPeakHours = () => {
-      const now = new Date();
-      const hour = now.getHours();
-      const minute = now.getMinutes();
-      const day = now.getDay();
-      
-      // 19:30 Flash Drop uyarısı (Stake.com)
-      if (hour === 19 && minute === 29) {
-        setNotifications(prev => [
-          '⚡ FLASH DROP UYARISI: Stake.com kodları 1 dakika içinde düşecek! @StakecomDailyDrops kanalını açın!',
-          ...prev
-        ].slice(0, 50));
+    if (isCollecting && config?.token) {
+      // İlk çekim
+      fetchUpdates();
+      // Her 5 saniyede bir kontrol
+      pollingRef.current = setInterval(fetchUpdates, 5000);
+    } else {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
       }
-      
-      // 19:00 Türkçe kanallar uyarısı
-      if (hour === 18 && minute === 55) {
-        setNotifications(prev => [
-          '🔔 Türkçe kanallar yoğun saat başlıyor (19:00-22:00). @kodbonus, @bonuskaplani, @casinotutkunu takip edin!',
-          ...prev
-        ].slice(0, 50));
-      }
-      
-      // Cumartesi 12:30 GMT VIP
-      if (day === 6 && hour === 14 && minute === 29) { // 12:30 GMT = 15:30 TRT (GMT+3)
-        setNotifications(prev => [
-          '👑 VIP UYARISI: Stake VIP Notices haftalık boost 1 dakika içinde! @+bzGuVC4YkKFlYmFl',
-          ...prev
-        ].slice(0, 50));
+    }
+
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
       }
     };
+  }, [isCollecting, config, fetchUpdates]);
 
-    const interval = setInterval(checkPeakHours, 60000); // Her dakika kontrol
-    return () => clearInterval(interval);
-  }, [loaded]);
-
-  const filteredCoupons = coupons.filter(coupon => {
-    const matchesFilter = filter === 'all' || coupon.status === filter;
-    const matchesPlatform = platformFilter === 'all' || coupon.platform === platformFilter;
-    const matchesSearch = searchQuery === '' || 
-      coupon.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      coupon.platform.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesFilter && matchesPlatform && matchesSearch;
-  });
-
-  const copyCode = useCallback((code: string) => {
-    navigator.clipboard.writeText(code);
-    setNotifications(prev => [`📋 Kopyalandı: ${code}`, ...prev].slice(0, 50));
-  }, []);
-
-  const addCoupon = useCallback((coupon: Omit<Coupon, 'id' | 'detectedAt'>) => {
-    const newCoupon: Coupon = {
-      ...coupon,
-      id: Date.now().toString() + Math.random().toString(36).substring(2),
-      detectedAt: new Date(),
-    };
-    setCoupons(prev => [newCoupon, ...prev]);
-    setNotifications(prev => [`✅ Kod eklendi: ${coupon.code}`, ...prev].slice(0, 50));
-    setShowAddModal(false);
-  }, []);
-
-  const deleteCoupon = useCallback((id: string) => {
-    setCoupons(prev => prev.filter(c => c.id !== id));
-  }, []);
-
-  const updateCouponStatus = useCallback((id: string, status: Coupon['status']) => {
-    setCoupons(prev => prev.map(c => c.id === id ? { ...c, status } : c));
-  }, []);
-
-  const stats = {
-    total: coupons.length,
-    new: coupons.filter(c => c.status === 'new').length,
-    active: coupons.filter(c => c.isActive && c.status !== 'expired').length,
-    today: coupons.filter(c => {
-      const today = new Date();
-      return c.detectedAt.toDateString() === today.toDateString();
-    }).length,
+  const handleSaveConfig = (newConfig: BotConfig) => {
+    setConfig(newConfig);
+    saveConfig(newConfig);
+    setLastUpdateId(0);
+    setActiveTab('collector');
   };
 
-  const tabs = [
-    { id: 'tracker' as const, label: 'Kod Takip', icon: '🎫' },
-    { id: 'sources' as const, label: 'Telegram Kaynakları', icon: '📡' },
-    { id: 'hours' as const, label: 'Yoğun Saatler', icon: '⏰' },
-  ];
+  const handleDeleteCoupon = (id: string) => {
+    setCoupons(prev => {
+      const updated = prev.filter(c => c.id !== id);
+      saveCoupons(updated);
+      return updated;
+    });
+  };
+
+  const handleUpdateStatus = (id: string, status: CollectedCoupon['status']) => {
+    setCoupons(prev => {
+      const updated = prev.map(c => c.id === id ? { ...c, status } : c);
+      saveCoupons(updated);
+      return updated;
+    });
+  };
+
+  const handleClearAll = () => {
+    if (confirm('Tüm toplanan kodları silmek istediğinize emin misiniz?')) {
+      setCoupons([]);
+      saveCoupons([]);
+    }
+  };
+
+  const handleDisconnect = () => {
+    setIsCollecting(false);
+    setConfig(null);
+    localStorage.removeItem(BOT_CONFIG_KEY);
+    setActiveTab('setup');
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900">
-      <Header
-        notifications={notifications}
-        showNotifications={showNotifications}
-        setShowNotifications={setShowNotifications}
-        onAddCoupon={() => setShowAddModal(true)}
-      />
+      {/* Header */}
+      <header className="bg-gray-900/80 backdrop-blur-md border-b border-purple-500/30 sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="text-3xl">🎰</div>
+            <div>
+              <h1 className="text-xl font-bold text-white">Casino Kod Avcısı</h1>
+              <p className="text-xs text-purple-300">Telegram'dan Otomatik Kupon Toplayıcı</p>
+            </div>
+          </div>
 
-      <main className="max-w-7xl mx-auto px-4 py-6">
-        {/* Tab Navigation */}
-        <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
-          {tabs.map(tab => (
+          <div className="flex items-center gap-3">
+            {config && (
+              <button
+                onClick={() => setIsCollecting(!isCollecting)}
+                className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-sm font-bold transition-all ${
+                  isCollecting
+                    ? 'bg-green-500/20 text-green-400 border border-green-500/50 animate-pulse'
+                    : 'bg-red-500/20 text-red-400 border border-red-500/50'
+                }`}
+              >
+                <span className={`w-2 h-2 rounded-full ${isCollecting ? 'bg-green-400' : 'bg-red-400'}`}></span>
+                {isCollecting ? 'TOPLUYOR' : 'DURDUR'}
+              </button>
+            )}
+          </div>
+        </div>
+      </header>
+
+      {/* Tabs */}
+      <div className="max-w-7xl mx-auto px-4 pt-4">
+        <div className="flex gap-2 overflow-x-auto pb-2">
+          {[
+            { id: 'collector' as const, label: 'Canlı Toplayıcı', icon: '📡' },
+            { id: 'codes' as const, label: `Toplanan Kodlar (${coupons.length})`, icon: '🎫' },
+            { id: 'setup' as const, label: 'Bot Ayarları', icon: '⚙️' },
+          ].map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
@@ -173,81 +290,39 @@ function App() {
             </button>
           ))}
         </div>
+      </div>
 
-        {/* Tracker Tab */}
-        {activeTab === 'tracker' && (
-          <>
-            <StatsPanel stats={stats} />
-
-            <FilterBar
-              filter={filter}
-              setFilter={setFilter}
-              platformFilter={platformFilter}
-              setPlatformFilter={setPlatformFilter}
-              searchQuery={searchQuery}
-              setSearchQuery={setSearchQuery}
-            />
-
-            {coupons.length === 0 ? (
-              <div className="text-center py-20">
-                <div className="text-7xl mb-6">🎰</div>
-                <h2 className="text-2xl font-bold text-white mb-3">Henüz kod eklemediniz</h2>
-                <p className="text-gray-400 mb-6 max-w-lg mx-auto">
-                  Telegram kanallarından yakaladığınız casino bonus kodlarını buraya ekleyin. 
-                  Kodlarınız bu cihazda kalıcı olarak saklanır.
-                </p>
-                <button
-                  onClick={() => setShowAddModal(true)}
-                  className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-xl font-medium transition-colors inline-flex items-center gap-2"
-                >
-                  <span>+</span> İlk Kodu Ekle
-                </button>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-6">
-                {filteredCoupons.map(coupon => (
-                  <CouponCard
-                    key={coupon.id}
-                    coupon={coupon}
-                    onCopy={copyCode}
-                    onDelete={deleteCoupon}
-                    onUpdateStatus={updateCouponStatus}
-                  />
-                ))}
-              </div>
-            )}
-
-            {coupons.length > 0 && filteredCoupons.length === 0 && (
-              <div className="text-center py-16">
-                <div className="text-6xl mb-4">🔍</div>
-                <h3 className="text-xl text-gray-300">Filtreye uygun kod bulunamadı</h3>
-                <p className="text-gray-500 mt-2">Filtreleri değiştirin</p>
-              </div>
-            )}
-          </>
+      {/* Content */}
+      <main className="max-w-7xl mx-auto px-4 py-6">
+        {activeTab === 'setup' && (
+          <BotSetup
+            config={config}
+            onSave={handleSaveConfig}
+          />
         )}
 
-        {/* Sources Tab */}
-        {activeTab === 'sources' && <SourcesDashboard />}
+        {activeTab === 'collector' && (
+          <LiveCollector
+            isCollecting={isCollecting}
+            config={config}
+            stats={stats}
+            error={error}
+            coupons={coupons}
+            onStart={() => setIsCollecting(true)}
+            onStop={() => setIsCollecting(false)}
+            onGoToSetup={() => setActiveTab('setup')}
+          />
+        )}
 
-        {/* Peak Hours Tab */}
-        {activeTab === 'hours' && <PeakHoursWidget />}
+        {activeTab === 'codes' && (
+          <CollectedCodes
+            coupons={coupons}
+            onDelete={handleDeleteCoupon}
+            onUpdateStatus={handleUpdateStatus}
+            onClearAll={handleClearAll}
+          />
+        )}
       </main>
-
-      {showAddModal && (
-        <AddCouponModal
-          onClose={() => setShowAddModal(false)}
-          onAdd={addCoupon}
-        />
-      )}
-
-      {showNotifications && (
-        <NotificationPanel
-          notifications={notifications}
-          onClose={() => setShowNotifications(false)}
-          onClear={() => setNotifications([])}
-        />
-      )}
     </div>
   );
 }

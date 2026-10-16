@@ -1,35 +1,22 @@
-export type CasinoPlatform = 
-  | 'betmgm' 
-  | 'draftkings' 
-  | 'caesars' 
-  | 'fanuel' 
-  | 'golden_nugget' 
-  | 'borgata'
-  | 'hard_rock'
-  | 'unibet'
-  | 'other';
-
-export type CouponStatus = 'new' | 'active' | 'expired' | 'used';
-
-export type BonusType = 'free_spins' | 'deposit_match' | 'no_deposit' | 'cashback';
-
-export interface Coupon {
+export interface CollectedCoupon {
   id: string;
   code: string;
-  platform: CasinoPlatform | string;
-  status: CouponStatus;
-  bonusType: BonusType;
-  value: number;
-  detectedAt: Date;
-  expiresAt: Date;
-  isActive: boolean;
-  sourceUrl?: string;
-  note?: string;
+  source: string;
+  chatId: number;
+  messageId: number;
+  fullText: string;
+  collectedAt: Date;
+  status: 'new' | 'used' | 'expired' | 'saved';
+  copied: boolean;
 }
 
-export interface Stats {
-  total: number;
-  new: number;
-  active: number;
-  today: number;
+export interface BotConfig {
+  token: string;
+  botUsername: string;
+  monitoredChannels: string[];
+}
+
+export interface CollectorStats {
+  messagesScanned: number;
+  codesFound: number;
 }
