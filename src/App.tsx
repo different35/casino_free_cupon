@@ -5,6 +5,8 @@ import CouponCard from './components/CouponCard';
 import FilterBar from './components/FilterBar';
 import NotificationPanel from './components/NotificationPanel';
 import AddCouponModal from './components/AddCouponModal';
+import SourcesDashboard from './components/SourcesDashboard';
+import PeakHoursWidget from './components/PeakHoursWidget';
 import { Coupon } from './types';
 
 const STORAGE_KEY = 'slotbonus_coupons';
@@ -42,20 +44,58 @@ function App() {
   const [showNotifications, setShowNotifications] = useState<boolean>(false);
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
   const [notifications, setNotifications] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState<'tracker' | 'sources' | 'hours'>('tracker');
   const [loaded, setLoaded] = useState(false);
 
-  // Load from localStorage on mount
   useEffect(() => {
     setCoupons(loadCoupons());
     setLoaded(true);
   }, []);
 
-  // Save to localStorage whenever coupons change
   useEffect(() => {
     if (loaded) {
       saveCoupons(coupons);
     }
   }, [coupons, loaded]);
+
+  // Bildirim zamanlayıcıları - yoğun saatlerde uyarı
+  useEffect(() => {
+    if (!loaded) return;
+    
+    const checkPeakHours = () => {
+      const now = new Date();
+      const hour = now.getHours();
+      const minute = now.getMinutes();
+      const day = now.getDay();
+      
+      // 19:30 Flash Drop uyarısı (Stake.com)
+      if (hour === 19 && minute === 29) {
+        setNotifications(prev => [
+          '⚡ FLASH DROP UYARISI: Stake.com kodları 1 dakika içinde düşecek! @StakecomDailyDrops kanalını açın!',
+          ...prev
+        ].slice(0, 50));
+      }
+      
+      // 19:00 Türkçe kanallar uyarısı
+      if (hour === 18 && minute === 55) {
+        setNotifications(prev => [
+          '🔔 Türkçe kanallar yoğun saat başlıyor (19:00-22:00). @kodbonus, @bonuskaplani, @casinotutkunu takip edin!',
+          ...prev
+        ].slice(0, 50));
+      }
+      
+      // Cumartesi 12:30 GMT VIP
+      if (day === 6 && hour === 14 && minute === 29) { // 12:30 GMT = 15:30 TRT (GMT+3)
+        setNotifications(prev => [
+          '👑 VIP UYARISI: Stake VIP Notices haftalık boost 1 dakika içinde! @+bzGuVC4YkKFlYmFl',
+          ...prev
+        ].slice(0, 50));
+      }
+    };
+
+    const interval = setInterval(checkPeakHours, 60000); // Her dakika kontrol
+    return () => clearInterval(interval);
+  }, [loaded]);
 
   const filteredCoupons = coupons.filter(coupon => {
     const matchesFilter = filter === 'all' || coupon.status === filter;
@@ -100,6 +140,12 @@ function App() {
     }).length,
   };
 
+  const tabs = [
+    { id: 'tracker' as const, label: 'Kod Takip', icon: '🎫' },
+    { id: 'sources' as const, label: 'Telegram Kaynakları', icon: '📡' },
+    { id: 'hours' as const, label: 'Yoğun Saatler', icon: '⏰' },
+  ];
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900">
       <Header
@@ -110,53 +156,82 @@ function App() {
       />
 
       <main className="max-w-7xl mx-auto px-4 py-6">
-        <StatsPanel stats={stats} />
-
-        <FilterBar
-          filter={filter}
-          setFilter={setFilter}
-          platformFilter={platformFilter}
-          setPlatformFilter={setPlatformFilter}
-          searchQuery={searchQuery}
-          setSearchQuery={setSearchQuery}
-        />
-
-        {coupons.length === 0 ? (
-          <div className="text-center py-20">
-            <div className="text-7xl mb-6">🎰</div>
-            <h2 className="text-2xl font-bold text-white mb-3">Henüz kod eklenmedi</h2>
-            <p className="text-gray-400 mb-6 max-w-md mx-auto">
-              Casino sitelerinden bulduğunuz bonus ve free spin kupon kodlarını buraya ekleyin. 
-              Kodlarınız bu tarayıcıda kalıcı olarak saklanır.
-            </p>
+        {/* Tab Navigation */}
+        <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
+          {tabs.map(tab => (
             <button
-              onClick={() => setShowAddModal(true)}
-              className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-xl font-medium transition-colors inline-flex items-center gap-2"
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${
+                activeTab === tab.id
+                  ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/30'
+                  : 'bg-gray-800/50 text-gray-400 hover:bg-gray-700/50 hover:text-gray-300 border border-gray-700/50'
+              }`}
             >
-              <span>+</span> İlk Kodu Ekle
+              <span>{tab.icon}</span>
+              {tab.label}
             </button>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-6">
-            {filteredCoupons.map(coupon => (
-              <CouponCard
-                key={coupon.id}
-                coupon={coupon}
-                onCopy={copyCode}
-                onDelete={deleteCoupon}
-                onUpdateStatus={updateCouponStatus}
-              />
-            ))}
-          </div>
+          ))}
+        </div>
+
+        {/* Tracker Tab */}
+        {activeTab === 'tracker' && (
+          <>
+            <StatsPanel stats={stats} />
+
+            <FilterBar
+              filter={filter}
+              setFilter={setFilter}
+              platformFilter={platformFilter}
+              setPlatformFilter={setPlatformFilter}
+              searchQuery={searchQuery}
+              setSearchQuery={setSearchQuery}
+            />
+
+            {coupons.length === 0 ? (
+              <div className="text-center py-20">
+                <div className="text-7xl mb-6">🎰</div>
+                <h2 className="text-2xl font-bold text-white mb-3">Henüz kod eklemediniz</h2>
+                <p className="text-gray-400 mb-6 max-w-lg mx-auto">
+                  Telegram kanallarından yakaladığınız casino bonus kodlarını buraya ekleyin. 
+                  Kodlarınız bu cihazda kalıcı olarak saklanır.
+                </p>
+                <button
+                  onClick={() => setShowAddModal(true)}
+                  className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-xl font-medium transition-colors inline-flex items-center gap-2"
+                >
+                  <span>+</span> İlk Kodu Ekle
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-6">
+                {filteredCoupons.map(coupon => (
+                  <CouponCard
+                    key={coupon.id}
+                    coupon={coupon}
+                    onCopy={copyCode}
+                    onDelete={deleteCoupon}
+                    onUpdateStatus={updateCouponStatus}
+                  />
+                ))}
+              </div>
+            )}
+
+            {coupons.length > 0 && filteredCoupons.length === 0 && (
+              <div className="text-center py-16">
+                <div className="text-6xl mb-4">🔍</div>
+                <h3 className="text-xl text-gray-300">Filtreye uygun kod bulunamadı</h3>
+                <p className="text-gray-500 mt-2">Filtreleri değiştirin</p>
+              </div>
+            )}
+          </>
         )}
 
-        {coupons.length > 0 && filteredCoupons.length === 0 && (
-          <div className="text-center py-16">
-            <div className="text-6xl mb-4">🔍</div>
-            <h3 className="text-xl text-gray-300">Filtreye uygun kod bulunamadı</h3>
-            <p className="text-gray-500 mt-2">Filtreleri değiştirin</p>
-          </div>
-        )}
+        {/* Sources Tab */}
+        {activeTab === 'sources' && <SourcesDashboard />}
+
+        {/* Peak Hours Tab */}
+        {activeTab === 'hours' && <PeakHoursWidget />}
       </main>
 
       {showAddModal && (
